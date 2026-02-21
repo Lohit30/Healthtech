@@ -51,8 +51,29 @@ db.exec(`
     name TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
     password TEXT NOT NULL,
-    role TEXT NOT NULL CHECK(role IN ('admin', 'doctor', 'patient')),
+    role TEXT NOT NULL CHECK(role IN ('admin', 'doctor', 'patient', 'pharmacy')),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Medicines inventory
+  CREATE TABLE IF NOT EXISTS medicines (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    category TEXT NOT NULL,
+    strength TEXT NOT NULL,
+    price REAL NOT NULL,
+    stock_quantity INTEGER NOT NULL DEFAULT 0
+  );
+
+  -- Prescriptions
+  CREATE TABLE IF NOT EXISTS prescriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+    doctor_id INTEGER NOT NULL REFERENCES doctors(id) ON DELETE CASCADE,
+    medicine_id TEXT NOT NULL REFERENCES medicines(id),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'dispensed')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    dispensed_at TEXT
   );
 
   -- Doctor availability slots
@@ -174,7 +195,34 @@ if (!availMigDone) {
   console.log('✅ Migration applied: appointments_add_availability_id');
 }
 
-// Seed initial doctors if none exist
+// Migration: update users role constraint and add medicines/prescriptions if not exist
+const pharmMigDone = db.prepare(`SELECT name FROM migrations WHERE name = 'users_add_pharmacy_role'`).get();
+if (!pharmMigDone) {
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+
+    CREATE TABLE users_new (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      password TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('admin', 'doctor', 'patient', 'pharmacy')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    INSERT INTO users_new SELECT id, name, email, password, role, created_at FROM users;
+
+    DROP TABLE users;
+
+    ALTER TABLE users_new RENAME TO users;
+
+    PRAGMA foreign_keys = ON;
+  `);
+  db.prepare(`INSERT INTO migrations (name) VALUES (?)`).run('users_add_pharmacy_role');
+  console.log('✅ Migration applied: users_add_pharmacy_role');
+}
+
+// Seed initial medicines if none exist
 const doctorCount = (db.prepare('SELECT COUNT(*) as count FROM doctors').get() as { count: number }).count;
 if (doctorCount === 0) {
   const insert = db.prepare('INSERT INTO doctors (name, specialization) VALUES (?, ?)');
@@ -221,6 +269,31 @@ if (userCount === 0) {
     'Super Admin', 'admin@ruralcare.com', hashedPassword, 'admin'
   );
   console.log('✅ Default admin seeded: admin@ruralcare.com / Admin@1234');
+}
+
+// Seed medicines if none exist
+const medicineCount = (db.prepare('SELECT COUNT(*) as count FROM medicines').get() as { count: number }).count;
+if (medicineCount === 0) {
+  const insert = db.prepare('INSERT INTO medicines (id, name, category, strength, price, stock_quantity) VALUES (?, ?, ?, ?, ?, ?)');
+  insert.run('med_amox', 'Amoxicillin', 'Antibiotic', '500mg', 12.50, 100);
+  insert.run('med_para', 'Paracetamol', 'Analgesic', '500mg', 5.00, 500);
+  insert.run('med_ibu', 'Ibuprofen', 'NSAID', '400mg', 8.50, 200);
+  insert.run('med_met', 'Metformin', 'Antidiabetic', '500mg', 15.00, 150);
+  insert.run('med_azith', 'Azithromycin', 'Antibiotic', '250mg', 25.00, 50);
+  insert.run('med_amlod', 'Amlodipine', 'Antihypertensive', '5mg', 18.00, 120);
+  insert.run('med_cet', 'Cetirizine', 'Antihistamine', '10mg', 6.50, 300);
+  insert.run('med_pant', 'Pantoprazole', 'Antacid', '40mg', 14.00, 80);
+  console.log('✅ Default medicines seeded');
+}
+
+// Seed pharmacy user
+const pharmCount = (db.prepare('SELECT COUNT(*) as count FROM users WHERE role = ?').get('pharmacy') as { count: number }).count;
+if (pharmCount === 0) {
+  const hashedPassword = bcrypt.hashSync('Pharmacy@1234', 10);
+  db.prepare('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)').run(
+    'Village Pharmacy', 'pharmacy@ruralcare.com', hashedPassword, 'pharmacy'
+  );
+  console.log('✅ Default pharmacy seeded: pharmacy@ruralcare.com / Pharmacy@1234');
 }
 
 export default db;

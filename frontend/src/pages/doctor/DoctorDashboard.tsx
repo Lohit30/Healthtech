@@ -16,6 +16,9 @@ interface ConsultationNote {
 interface Slot {
     id: number; doctor_id: number; date: string; start_time: string; end_time: string; is_booked: number;
 }
+interface Medicine {
+    id: string; name: string; category: string; strength: string; stock_quantity: number;
+}
 
 const riskBadge = {
     high: 'bg-red-100 text-red-700 border border-red-200',
@@ -27,13 +30,22 @@ export default function DoctorDashboard() {
     const [patients, setPatients] = useState<Patient[]>([]);
     const [notes, setNotes] = useState<ConsultationNote[]>([]);
     const [slots, setSlots] = useState<Slot[]>([]);
-    const [tab, setTab] = useState<'monitor' | 'patients' | 'highrisk' | 'notes' | 'slots'>('monitor');
+    const [medicines, setMedicines] = useState<Medicine[]>([]);
+    const [tab, setTab] = useState<'monitor' | 'patients' | 'highrisk' | 'notes' | 'slots' | 'rx'>('monitor');
+
+    // Forms state
     const [noteForm, setNoteForm] = useState({ patient_id: '', raw_note: '', structured_summary: '', follow_up_days: '' });
     const [noteMsg, setNoteMsg] = useState('');
     const [noteError, setNoteError] = useState('');
+
     const [slotForm, setSlotForm] = useState({ doctor_id: '', date: '', start_time: '', end_time: '' });
     const [slotMsg, setSlotMsg] = useState('');
     const [slotError, setSlotError] = useState('');
+
+    const [rxForm, setRxForm] = useState({ patient_id: '', medicine_id: '', doctor_id: '' });
+    const [rxMsg, setRxMsg] = useState('');
+    const [rxError, setRxError] = useState('');
+
     const [doctors, setDoctors] = useState<{ id: number; name: string }[]>([]);
 
     // ── Live vitals (polls every 3 s) ─────────────────────────────────────────
@@ -43,13 +55,14 @@ export default function DoctorDashboard() {
     }).length;
 
     const fetchAll = useCallback(async () => {
-        const [p, n, s, d] = await Promise.all([
+        const [p, n, s, d, m] = await Promise.all([
             authFetch('/api/patients').then(r => r.json()),
             authFetch('/api/consultations').then(r => r.json()),
             authFetch('/api/availability').then(r => r.json()),
             authFetch('/api/doctors').then(r => r.json()),
+            authFetch('/api/medicines').then(r => r.json()),
         ]);
-        setPatients(p); setNotes(n); setSlots(s); setDoctors(d);
+        setPatients(p); setNotes(n); setSlots(s); setDoctors(d); setMedicines(m);
     }, []);
 
     useEffect(() => {
@@ -99,12 +112,30 @@ export default function DoctorDashboard() {
         fetchAll();
     };
 
+    const handlePrescription = async (e: React.FormEvent) => {
+        e.preventDefault(); setRxMsg(''); setRxError('');
+        const res = await authFetch('/api/prescriptions', {
+            method: 'POST',
+            body: JSON.stringify({
+                patient_id: Number(rxForm.patient_id),
+                medicine_id: rxForm.medicine_id,
+                doctor_id: Number(rxForm.doctor_id)
+            }),
+        });
+        const data = await res.json();
+        if (!res.ok) { setRxError(data.error); return; }
+        setRxMsg('✅ Prescription assigned successfully');
+        setRxForm(f => ({ ...f, patient_id: '', medicine_id: '' }));
+        fetchAll();
+    };
+
     const tabs = [
         { key: 'monitor', label: `❤️ Live Monitor${criticalCount > 0 ? ` 🚨${criticalCount}` : ''}` },
         { key: 'patients', label: '👥 All Patients' },
         { key: 'highrisk', label: `🚨 High Risk (${highRisk.length})` },
         { key: 'notes', label: '📝 Add Note' },
         { key: 'slots', label: `🗓 My Slots (${slots.length})` },
+        { key: 'rx', label: '💊 Prescribe Rx' },
     ] as const;
 
     return (
@@ -329,6 +360,58 @@ export default function DoctorDashboard() {
                                 </div>
                             </div>
                         ))}
+                    </div>
+                </div>
+            )}
+
+            {/* ── PRESCRIBE RX ───────────────────────────────────────────────── */}
+            {tab === 'rx' && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="card">
+                        <h2 className="text-base font-semibold text-slate-700 mb-4">Assign Medication</h2>
+                        <form onSubmit={handlePrescription} className="space-y-4">
+                            <div>
+                                <label className="form-label">Doctor *</label>
+                                <select className="form-input" value={rxForm.doctor_id} onChange={e => setRxForm(f => ({ ...f, doctor_id: e.target.value }))} required>
+                                    <option value="">Select treating doctor...</option>
+                                    {doctors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="form-label">Patient *</label>
+                                <select className="form-input" value={rxForm.patient_id} onChange={e => setRxForm(f => ({ ...f, patient_id: e.target.value }))} required>
+                                    <option value="">Select patient...</option>
+                                    {patients.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="form-label">Medicine *</label>
+                                <select className="form-input" value={rxForm.medicine_id} onChange={e => setRxForm(f => ({ ...f, medicine_id: e.target.value }))} required>
+                                    <option value="">Select medicine...</option>
+                                    {medicines.filter(m => m.stock_quantity > 0).map(m => (
+                                        <option key={m.id} value={m.id}>{m.name} - {m.strength} ({m.category})</option>
+                                    ))}
+                                </select>
+                            </div>
+                            {rxError && <div className="text-red-600 text-sm bg-red-50 rounded-lg px-3 py-2">{rxError}</div>}
+                            {rxMsg && <div className="text-green-700 text-sm bg-green-50 rounded-lg px-3 py-2">{rxMsg}</div>}
+                            <button type="submit" className="btn-primary w-full bg-indigo-600 hover:bg-indigo-700">Send to Pharmacy</button>
+                        </form>
+                    </div>
+
+                    <div className="space-y-2">
+                        <div className="bg-orange-50 rounded-xl p-5 border border-orange-200">
+                            <h3 className="font-bold text-orange-800 flex items-center gap-2 text-sm"><span className="text-lg">💊</span> Dispensary Protocol</h3>
+                            <p className="text-sm text-orange-700 mt-2">
+                                Prescriptions sent from this panel route directly to the RuralCare Village Pharmacy dashboard.
+                                Patients can collect their prescribed medications with their ID.
+                            </p>
+                            <ul className="list-disc pl-5 mt-3 text-xs text-orange-700/80 space-y-1">
+                                <li>Medicine availability is checked in real-time.</li>
+                                <li>Out of stock medicines are removed from the drop-down.</li>
+                                <li>Dispensary staff review before final release.</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
             )}

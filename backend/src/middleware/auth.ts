@@ -7,7 +7,7 @@ export interface AuthPayload {
     id: number;
     name: string;
     email: string;
-    role: 'admin' | 'doctor' | 'patient';
+    role: 'admin' | 'doctor' | 'patient' | 'pharmacy';
 }
 
 // Extend Express Request to carry user info

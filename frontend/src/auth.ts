@@ -3,7 +3,7 @@ export interface AuthUser {
     id: number;
     name: string;
     email: string;
-    role: 'admin' | 'doctor' | 'patient';
+    role: 'admin' | 'doctor' | 'patient' | 'pharmacy';
 }
 
 export function getToken(): string | null {

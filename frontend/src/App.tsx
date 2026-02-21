@@ -14,6 +14,7 @@ import ConsultationNotes from './pages/ConsultationNotes';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import DoctorDashboard from './pages/doctor/DoctorDashboard';
 import PatientDashboard from './pages/patient/PatientDashboard';
+import PharmacyDashboard from './pages/pharmacy/PharmacyDashboard';
 
 // Sidebar nav definitions per role
 const navByRole: Record<string, { to: string; label: string; icon: string; end?: boolean }[]> = {
@@ -34,12 +35,16 @@ const navByRole: Record<string, { to: string; label: string; icon: string; end?:
         { to: '/patient/dashboard', label: 'My Portal', icon: '🏠', end: true },
         { to: '/appointments', label: 'Book Appointment', icon: '📅' },
     ],
+    pharmacy: [
+        { to: '/pharmacy/dashboard', label: 'Pharmacy Dashboard', icon: '💊', end: true },
+    ],
 };
 
 const roleColors: Record<AuthUser['role'], string> = {
     admin: 'bg-red-500',
     doctor: 'bg-blue-500',
     patient: 'bg-green-500',
+    pharmacy: 'bg-orange-500',
 };
 
 // Redirect unauthenticated users to login
@@ -55,6 +60,7 @@ function RoleRedirect() {
     if (!user) return <Navigate to="/login" replace />;
     if (user.role === 'admin') return <Navigate to="/admin/dashboard" replace />;
     if (user.role === 'doctor') return <Navigate to="/doctor/dashboard" replace />;
+    if (user.role === 'pharmacy') return <Navigate to="/pharmacy/dashboard" replace />;
     return <Navigate to="/patient/dashboard" replace />;
 }
 
@@ -132,6 +138,7 @@ function AppLayout() {
                     <Route path="/admin/dashboard" element={<AdminDashboard />} />
                     <Route path="/doctor/dashboard" element={<DoctorDashboard />} />
                     <Route path="/patient/dashboard" element={<PatientDashboard />} />
+                    <Route path="/pharmacy/dashboard" element={<PharmacyDashboard />} />
                 </Routes>
             </main>
         </div>
