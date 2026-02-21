@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
+import { NavLink } from 'react-router-dom';
 import { getUser, authFetch } from '../../auth';
 import { useRefetchOnFocus } from '../../hooks/useRefetchOnFocus';
 import { useVitals } from '../../hooks/useVitals';
 import { computeRisk, RiskLevel } from '../../utils/vitalsUtils';
 
 interface Appointment {
-    id: number; patient_name: string; doctor_name: string; date: string; status: string;
+    id: number; patient_name: string; doctor_name: string; date: string; status: string; patient_id: number; doctor_id: number;
 }
 interface ConsultationNote {
     id: number; patient_name: string; raw_note: string;
@@ -51,11 +52,27 @@ export default function PatientDashboard() {
         Promise.all([
             authFetch('/api/appointments').then(r => r.json()),
             authFetch('/api/consultations').then(r => r.json()),
-        ]).then(([a, n]) => { setAppointments(a); setNotes(n); });
+        ])
+            .then(([a, n]) => {
+                setAppointments(Array.isArray(a) ? a : []);
+                setNotes(Array.isArray(n) ? n : []);
+            })
+            .catch(err => console.error('Failed to fetch patient data:', err));
     }, []);
 
-    useEffect(() => { fetchData(); }, [fetchData]);
+    useEffect(() => {
+        fetchData();
+        const interval = setInterval(fetchData, 10000); // Poll every 10 seconds
+        return () => clearInterval(interval);
+    }, [fetchData]);
+
     useRefetchOnFocus(fetchData);
+
+    const handleCancel = async (id: number) => {
+        if (!confirm('Cancel this appointment?')) return;
+        const res = await authFetch(`/api/appointments/${id}`, { method: 'DELETE' });
+        if (res.ok) fetchData();
+    };
 
     const upcoming = appointments.filter(a => a.status === 'scheduled');
     const completed = appointments.filter(a => a.status === 'completed');
@@ -190,8 +207,11 @@ export default function PatientDashboard() {
             {/* ── APPOINTMENTS ─────────────────────────────────────────────── */}
             {tab === 'appointments' && (
                 <div className="space-y-4">
-                    {upcoming.length > 0 && (<>
+                    <div className="flex items-center justify-between">
                         <h2 className="text-sm font-semibold text-slate-500 uppercase">Upcoming</h2>
+                        <NavLink to="/appointments" className="text-xs text-blue-600 hover:underline font-medium">+ Book New</NavLink>
+                    </div>
+                    {upcoming.length > 0 && (<>
                         {upcoming.map(a => (
                             <div key={a.id} className="card flex items-center justify-between border-l-4 border-blue-400">
                                 <div>
@@ -199,7 +219,13 @@ export default function PatientDashboard() {
                                     <p className="text-sm text-slate-500">with {a.doctor_name}</p>
                                     <p className="text-xs text-slate-400 mt-0.5">{new Date(a.date).toLocaleString()}</p>
                                 </div>
-                                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full capitalize ${statusStyle[a.status]}`}>{a.status}</span>
+                                <div className="flex flex-col items-end gap-2">
+                                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full capitalize ${statusStyle[a.status]}`}>{a.status}</span>
+                                    <div className="flex gap-2">
+                                        <NavLink to="/appointments" className="text-xs text-blue-600 hover:text-blue-800 font-medium">Reschedule</NavLink>
+                                        <button onClick={() => handleCancel(a.id)} className="text-xs text-red-600 hover:text-red-800 font-medium">Cancel</button>
+                                    </div>
+                                </div>
                             </div>
                         ))}
                     </>)}

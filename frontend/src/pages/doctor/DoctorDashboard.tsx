@@ -39,7 +39,6 @@ export default function DoctorDashboard() {
     // ── Live vitals (polls every 3 s) ─────────────────────────────────────────
     const { vitals, alerts } = useVitals('all');
     const criticalCount = vitals.filter(v => {
-        const { computeRisk } = require('../../utils/vitalsUtils');
         return computeRisk(v.heart_rate, v.spo2, v.glucose) === 'critical';
     }).length;
 
@@ -53,7 +52,12 @@ export default function DoctorDashboard() {
         setPatients(p); setNotes(n); setSlots(s); setDoctors(d);
     }, []);
 
-    useEffect(() => { fetchAll(); }, [fetchAll]);
+    useEffect(() => {
+        fetchAll();
+        const interval = setInterval(fetchAll, 5000); // Poll every 5 seconds
+        return () => clearInterval(interval);
+    }, [fetchAll]);
+
     useRefetchOnFocus(fetchAll);
 
     const highRisk = patients.filter(p => p.risk_level === 'high');

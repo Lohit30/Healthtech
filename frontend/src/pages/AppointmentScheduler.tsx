@@ -32,35 +32,60 @@ export default function AppointmentScheduler() {
     const [loading, setLoading] = useState(false);
 
     const fetchAll = useCallback(async () => {
-        const [appts, pts, drs] = await Promise.all([
-            authFetch('/api/appointments').then(r => r.json()),
-            authFetch('/api/patients').then(r => r.json()),
-            authFetch('/api/doctors').then(r => r.json()),
-        ]);
-        setAppointments(appts);
-        setPatients(pts);
-        setDoctors(drs);
+        try {
+            const [appts, pts, drs] = await Promise.all([
+                authFetch('/api/appointments').then(r => r.json()),
+                authFetch('/api/patients').then(r => r.json()),
+                authFetch('/api/doctors').then(r => r.json()),
+            ]);
+            setAppointments(Array.isArray(appts) ? appts : []);
+            setPatients(Array.isArray(pts) ? pts : []);
+            setDoctors(Array.isArray(drs) ? drs : []);
+        } catch (err) {
+            console.error('Failed to fetch data:', err);
+        }
     }, []);
 
-    useEffect(() => { fetchAll(); }, [fetchAll]);
+    useEffect(() => {
+        fetchAll();
+        const interval = setInterval(fetchAll, 5000); // Poll every 5 seconds
+        return () => clearInterval(interval);
+    }, [fetchAll]);
+
     useRefetchOnFocus(fetchAll);
+
+    // Reschedule state
+    const [reschedulingId, setReschedulingId] = useState<number | null>(null);
 
     // Load free slots whenever doctor changes
     useEffect(() => {
-        setSelectedSlotId('');
-        setFreeSlots([]);
+        if (!reschedulingId) {
+            setSelectedSlotId('');
+            setFreeSlots([]);
+        }
         if (!form.doctor_id) return;
         authFetch(`/api/availability?doctor_id=${form.doctor_id}`)
             .then(r => r.json())
             .then(slots => setFreeSlots(Array.isArray(slots) ? slots : []));
-    }, [form.doctor_id]);
+    }, [form.doctor_id, reschedulingId]);
+
+    const handleRescheduleInit = (appt: Appointment) => {
+        setReschedulingId(appt.id);
+        setForm({
+            patient_id: String(appt.patient_id),
+            doctor_id: String(appt.doctor_id),
+            date: appt.date,
+            status: appt.status
+        });
+        // We might want to see if the current availability ID is in the slots, 
+        // but typically rescheduling means picking a NEW slot.
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
         setLoading(true);
         try {
-            // Build date from slot if one was picked, else use manual date field
             const chosenSlot = freeSlots.find(s => String(s.id) === selectedSlotId);
             const dateToSend = chosenSlot ? `${chosenSlot.date}T${chosenSlot.start_time}` : form.date;
             if (!dateToSend) throw new Error('Please pick a slot or enter a date/time');
@@ -72,14 +97,18 @@ export default function AppointmentScheduler() {
             };
             if (selectedSlotId) body.availability_id = Number(selectedSlotId);
 
-            const res = await authFetch('/api/appointments', { method: 'POST', body: JSON.stringify(body) });
+            const url = reschedulingId ? `/api/appointments/${reschedulingId}` : '/api/appointments';
+            const method = reschedulingId ? 'PUT' : 'POST';
+
+            const res = await authFetch(url, { method, body: JSON.stringify(body) });
             if (!res.ok) {
                 const d = await res.json();
-                throw new Error(d.error || 'Failed to create appointment');
+                throw new Error(d.error || `Failed to ${reschedulingId ? 'reschedule' : 'create'} appointment`);
             }
             setForm({ patient_id: '', doctor_id: '', date: '', status: 'scheduled' });
             setSelectedSlotId('');
             setFreeSlots([]);
+            setReschedulingId(null);
             fetchAll();
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : 'Error');
@@ -112,7 +141,9 @@ export default function AppointmentScheduler() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Form */}
                 <div className="card">
-                    <h2 className="text-base font-semibold text-slate-700 mb-4">New Appointment</h2>
+                    <h2 className="text-base font-semibold text-slate-700 mb-4">
+                        {reschedulingId ? 'Reschedule Appointment' : 'New Appointment'}
+                    </h2>
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
                             <label className="form-label">Patient *</label>
@@ -121,6 +152,7 @@ export default function AppointmentScheduler() {
                                 value={form.patient_id}
                                 onChange={e => setForm(p => ({ ...p, patient_id: e.target.value }))}
                                 required
+                                disabled={!!reschedulingId}
                             >
                                 <option value="">Select patient...</option>
                                 {patients.map(p => (
@@ -135,6 +167,7 @@ export default function AppointmentScheduler() {
                                 value={form.doctor_id}
                                 onChange={e => setForm(p => ({ ...p, doctor_id: e.target.value }))}
                                 required
+                                disabled={!!reschedulingId}
                             >
                                 <option value="">Select doctor...</option>
                                 {doctors.map(d => (
@@ -183,9 +216,16 @@ export default function AppointmentScheduler() {
                         {error && (
                             <div className="text-red-600 text-sm bg-red-50 rounded-lg px-3 py-2">{error}</div>
                         )}
-                        <button type="submit" disabled={loading} className="btn-primary w-full">
-                            {loading ? 'Scheduling...' : 'Schedule Appointment'}
-                        </button>
+                        <div className="flex gap-2">
+                            {reschedulingId && (
+                                <button type="button" onClick={() => { setReschedulingId(null); setForm({ patient_id: '', doctor_id: '', date: '', status: 'scheduled' }); }} className="btn-secondary flex-1">
+                                    Cancel
+                                </button>
+                            )}
+                            <button type="submit" disabled={loading} className="btn-primary flex-[2]">
+                                {loading ? (reschedulingId ? 'Rescheduling...' : 'Scheduling...') : (reschedulingId ? 'Confirm Reschedule' : 'Schedule Appointment')}
+                            </button>
+                        </div>
                     </form>
                 </div>
 
@@ -210,14 +250,22 @@ export default function AppointmentScheduler() {
                                         {a.status}
                                     </span>
                                     {a.status === 'scheduled' && (
-                                        <button
-                                            onClick={() => markCompleted(a.id)}
-                                            className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-                                        >
-                                            ✓ Complete
-                                        </button>
+                                        <>
+                                            <button
+                                                onClick={() => markCompleted(a.id)}
+                                                className="text-xs text-green-600 hover:text-green-800 font-medium"
+                                            >
+                                                ✓ Complete
+                                            </button>
+                                            <button
+                                                onClick={() => handleRescheduleInit(a)}
+                                                className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                                            >
+                                                ✎ Reschedule
+                                            </button>
+                                        </>
                                     )}
-                                    <button onClick={() => handleDelete(a.id)} className="btn-danger text-xs py-1 px-2">Del</button>
+                                    <button onClick={() => handleDelete(a.id)} className="btn-danger text-xs py-1 px-2">Cancel</button>
                                 </div>
                             </div>
                         ))}

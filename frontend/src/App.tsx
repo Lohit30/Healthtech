@@ -32,6 +32,7 @@ const navByRole: Record<string, { to: string; label: string; icon: string; end?:
     ],
     patient: [
         { to: '/patient/dashboard', label: 'My Portal', icon: '🏠', end: true },
+        { to: '/appointments', label: 'Book Appointment', icon: '📅' },
     ],
 };
 
