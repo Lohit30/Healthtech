@@ -31,9 +31,14 @@ export default function DoctorDashboard() {
     const [notes, setNotes] = useState<ConsultationNote[]>([]);
     const [slots, setSlots] = useState<Slot[]>([]);
     const [medicines, setMedicines] = useState<Medicine[]>([]);
-    const [tab, setTab] = useState<'monitor' | 'patients' | 'highrisk' | 'notes' | 'slots' | 'rx'>('monitor');
+    const [tab, setTab] = useState<'monitor' | 'patients' | 'highrisk' | 'notes' | 'slots'>('monitor');
 
-    // Forms state
+    // Modals & Forms state
+    const [rxModalPatient, setRxModalPatient] = useState<Patient | null>(null);
+    const [rxForm, setRxForm] = useState({ medicine_id: '' });
+    const [rxMsg, setRxMsg] = useState('');
+    const [rxError, setRxError] = useState('');
+
     const [noteForm, setNoteForm] = useState({ patient_id: '', raw_note: '', structured_summary: '', follow_up_days: '' });
     const [noteMsg, setNoteMsg] = useState('');
     const [noteError, setNoteError] = useState('');
@@ -41,10 +46,6 @@ export default function DoctorDashboard() {
     const [slotForm, setSlotForm] = useState({ doctor_id: '', date: '', start_time: '', end_time: '' });
     const [slotMsg, setSlotMsg] = useState('');
     const [slotError, setSlotError] = useState('');
-
-    const [rxForm, setRxForm] = useState({ patient_id: '', medicine_id: '', doctor_id: '' });
-    const [rxMsg, setRxMsg] = useState('');
-    const [rxError, setRxError] = useState('');
 
     const [doctors, setDoctors] = useState<{ id: number; name: string }[]>([]);
 
@@ -54,16 +55,22 @@ export default function DoctorDashboard() {
         return computeRisk(v.heart_rate, v.spo2, v.glucose) === 'critical';
     }).length;
 
-    const fetchAll = useCallback(async () => {
-        const [p, n, s, d, m] = await Promise.all([
-            authFetch('/api/patients').then(r => r.json()),
-            authFetch('/api/consultations').then(r => r.json()),
-            authFetch('/api/availability').then(r => r.json()),
-            authFetch('/api/doctors').then(r => r.json()),
-            authFetch('/api/medicines').then(r => r.json()),
-        ]);
-        setPatients(p); setNotes(n); setSlots(s); setDoctors(d); setMedicines(m);
-    }, []);
+    const fetchAll = async () => {
+        try {
+            const [p, n, s, m] = await Promise.all([
+                authFetch('/api/patients').then(r => r.json()),
+                authFetch('/api/consultations').then(r => r.json()),
+                authFetch('/api/availability').then(r => r.json()),
+                authFetch('/api/medicines').then(r => r.json())
+            ]);
+            setPatients(p);
+            setNotes(n);
+            setSlots(s);
+            setMedicines(m);
+        } catch (e) {
+            console.error("Dashboard fetch error:", e);
+        }
+    };
 
     useEffect(() => {
         fetchAll();
@@ -112,21 +119,48 @@ export default function DoctorDashboard() {
         fetchAll();
     };
 
+    const handleDownloadReport = async (patientId: number, patientName: string) => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`/api/reports/${patientId}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (!res.ok) throw new Error('Failed to generate report');
+
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${patientName.replace(/\\s+/g, '_')}_Clinical_Report.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error("Error downloading report:", err);
+            alert("Failed to download the patient report.");
+        }
+    };
+
     const handlePrescription = async (e: React.FormEvent) => {
         e.preventDefault(); setRxMsg(''); setRxError('');
+        if (!rxModalPatient) return;
         const res = await authFetch('/api/prescriptions', {
             method: 'POST',
             body: JSON.stringify({
-                patient_id: Number(rxForm.patient_id),
-                medicine_id: rxForm.medicine_id,
-                doctor_id: Number(rxForm.doctor_id)
+                patient_id: rxModalPatient.id,
+                medicine_id: rxForm.medicine_id
             }),
         });
         const data = await res.json();
         if (!res.ok) { setRxError(data.error); return; }
         setRxMsg('✅ Prescription assigned successfully');
-        setRxForm(f => ({ ...f, patient_id: '', medicine_id: '' }));
+        setRxForm({ medicine_id: '' });
         fetchAll();
+        setTimeout(() => {
+            setRxModalPatient(null);
+            setRxMsg('');
+        }, 1500);
     };
 
     const tabs = [
@@ -135,7 +169,6 @@ export default function DoctorDashboard() {
         { key: 'highrisk', label: `🚨 High Risk (${highRisk.length})` },
         { key: 'notes', label: '📝 Add Note' },
         { key: 'slots', label: `🗓 My Slots (${slots.length})` },
-        { key: 'rx', label: '💊 Prescribe Rx' },
     ] as const;
 
     return (
@@ -219,12 +252,12 @@ export default function DoctorDashboard() {
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm">
                             <thead className="bg-slate-50 border-b border-slate-200">
-                                <tr>{['Patient', 'Age/Sex', 'Village', 'Symptoms', 'Vitals', 'Risk'].map(h => (
+                                <tr>{['Patient', 'Age/Sex', 'Village', 'Symptoms', 'Vitals', 'Risk', 'Actions'].map(h => (
                                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">{h}</th>
                                 ))}</tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {patients.length === 0 && <tr><td colSpan={6} className="text-center py-10 text-slate-400">No patients yet</td></tr>}
+                                {patients.length === 0 && <tr><td colSpan={7} className="text-center py-10 text-slate-400">No patients yet</td></tr>}
                                 {patients.map(p => (
                                     <tr key={p.id} className={`hover:bg-slate-50 ${p.risk_level === 'high' ? 'bg-red-50/40' : ''}`}>
                                         <td className="px-4 py-3 font-medium text-slate-800">{p.name}</td>
@@ -236,6 +269,16 @@ export default function DoctorDashboard() {
                                             <span className={`text-xs font-semibold px-2.5 py-1 rounded-full capitalize ${riskBadge[p.risk_level]}`}>
                                                 {p.risk_level === 'high' ? '🚨 ' : p.risk_level === 'medium' ? '⚠️ ' : '✅ '}{p.risk_level}
                                             </span>
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <div className="flex gap-2">
+                                                <button onClick={() => handleDownloadReport(p.id, p.name)} className="btn-secondary text-xs py-1 px-2 whitespace-nowrap" title="Download Medical Report">
+                                                    📄 Report
+                                                </button>
+                                                <button onClick={() => setRxModalPatient(p)} className="btn-primary text-xs py-1 px-2 whitespace-nowrap bg-indigo-600 hover:bg-indigo-700">
+                                                    💊 Prescribe
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}
@@ -260,8 +303,12 @@ export default function DoctorDashboard() {
                                     <p className="text-sm text-slate-600 mt-1"><span className="font-medium">Symptoms:</span> {p.symptoms}</p>
                                     <p className="text-sm text-slate-600"><span className="font-medium">Vitals:</span> {p.vitals}</p>
                                 </div>
-                                <button onClick={() => { setTab('notes'); setNoteForm(f => ({ ...f, patient_id: String(p.id) })); }}
-                                    className="btn-primary text-xs ml-4 whitespace-nowrap">Add Note</button>
+                                <div className="flex flex-col gap-2">
+                                    <button onClick={() => handleDownloadReport(p.id, p.name)} className="btn-secondary text-xs ml-4 whitespace-nowrap">📄 Download Report</button>
+                                    <button onClick={() => setRxModalPatient(p)} className="btn-primary text-xs ml-4 whitespace-nowrap bg-indigo-600 hover:bg-indigo-700">💊 Prescribe</button>
+                                    <button onClick={() => { setTab('notes'); setNoteForm(f => ({ ...f, patient_id: String(p.id) })); }}
+                                        className="btn-primary text-xs ml-4 whitespace-nowrap">Add Note</button>
+                                </div>
                             </div>
                         </div>
                     ))}
@@ -364,26 +411,22 @@ export default function DoctorDashboard() {
                 </div>
             )}
 
-            {/* ── PRESCRIBE RX ───────────────────────────────────────────────── */}
-            {tab === 'rx' && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div className="card">
-                        <h2 className="text-base font-semibold text-slate-700 mb-4">Assign Medication</h2>
+            {/* ── RX MODAL ─────────────────────────────────────────────────── */}
+            {rxModalPatient && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                    <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl relative animate-fade-in-up">
+                        <button
+                            onClick={() => { setRxModalPatient(null); setRxMsg(''); setRxError(''); }}
+                            className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-full w-8 h-8 flex items-center justify-center transition-colors"
+                        >
+                            ✕
+                        </button>
+                        <h2 className="text-xl font-bold text-slate-800 mb-1 flex items-center gap-2">
+                            <span className="text-2xl">💊</span> Prescribe Medication
+                        </h2>
+                        <p className="text-sm text-slate-500 mb-6">Assigning to <span className="font-medium text-slate-800">{rxModalPatient.name}</span></p>
+
                         <form onSubmit={handlePrescription} className="space-y-4">
-                            <div>
-                                <label className="form-label">Doctor *</label>
-                                <select className="form-input" value={rxForm.doctor_id} onChange={e => setRxForm(f => ({ ...f, doctor_id: e.target.value }))} required>
-                                    <option value="">Select treating doctor...</option>
-                                    {doctors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="form-label">Patient *</label>
-                                <select className="form-input" value={rxForm.patient_id} onChange={e => setRxForm(f => ({ ...f, patient_id: e.target.value }))} required>
-                                    <option value="">Select patient...</option>
-                                    {patients.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                                </select>
-                            </div>
                             <div>
                                 <label className="form-label">Medicine *</label>
                                 <select className="form-input" value={rxForm.medicine_id} onChange={e => setRxForm(f => ({ ...f, medicine_id: e.target.value }))} required>
@@ -392,26 +435,18 @@ export default function DoctorDashboard() {
                                         <option key={m.id} value={m.id}>{m.name} - {m.strength} ({m.category})</option>
                                     ))}
                                 </select>
+                                <p className="text-xs text-slate-400 mt-1">Only medicines currently in stock are shown.</p>
                             </div>
-                            {rxError && <div className="text-red-600 text-sm bg-red-50 rounded-lg px-3 py-2">{rxError}</div>}
-                            {rxMsg && <div className="text-green-700 text-sm bg-green-50 rounded-lg px-3 py-2">{rxMsg}</div>}
-                            <button type="submit" className="btn-primary w-full bg-indigo-600 hover:bg-indigo-700">Send to Pharmacy</button>
-                        </form>
-                    </div>
 
-                    <div className="space-y-2">
-                        <div className="bg-orange-50 rounded-xl p-5 border border-orange-200">
-                            <h3 className="font-bold text-orange-800 flex items-center gap-2 text-sm"><span className="text-lg">💊</span> Dispensary Protocol</h3>
-                            <p className="text-sm text-orange-700 mt-2">
-                                Prescriptions sent from this panel route directly to the RuralCare Village Pharmacy dashboard.
-                                Patients can collect their prescribed medications with their ID.
-                            </p>
-                            <ul className="list-disc pl-5 mt-3 text-xs text-orange-700/80 space-y-1">
-                                <li>Medicine availability is checked in real-time.</li>
-                                <li>Out of stock medicines are removed from the drop-down.</li>
-                                <li>Dispensary staff review before final release.</li>
-                            </ul>
-                        </div>
+                            {rxError && <div className="text-red-600 text-sm bg-red-50 rounded-lg px-3 py-2 border border-red-100">{rxError}</div>}
+                            {rxMsg && <div className="text-green-700 text-sm bg-green-50 rounded-lg px-3 py-2 border border-green-100">{rxMsg}</div>}
+
+                            <div className="pt-2">
+                                <button type="submit" className="btn-primary w-full bg-indigo-600 hover:bg-indigo-700 py-2.5">
+                                    Send to Pharmacy
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             )}

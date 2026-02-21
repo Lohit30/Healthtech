@@ -15,6 +15,7 @@ const availability_1 = __importDefault(require("./routes/availability"));
 const vitals_1 = __importDefault(require("./routes/vitals"));
 const medicines_1 = __importDefault(require("./routes/medicines"));
 const prescriptions_1 = __importDefault(require("./routes/prescriptions"));
+const reports_1 = __importDefault(require("./routes/reports"));
 // Initialize DB (runs schema creation & seeding)
 require("./db");
 const app = (0, express_1.default)();
@@ -34,6 +35,7 @@ app.use('/api/availability', availability_1.default);
 app.use('/api/vitals', vitals_1.default);
 app.use('/api/medicines', medicines_1.default);
 app.use('/api/prescriptions', prescriptions_1.default);
+app.use('/api/reports', reports_1.default);
 app.listen(PORT, () => {
     console.log(`✅ Backend running at http://localhost:${PORT}`);
 });

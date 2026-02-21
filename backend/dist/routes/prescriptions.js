@@ -49,23 +49,17 @@ router.post('/', auth_1.authenticate, (0, auth_1.requireRole)('doctor'), (req, r
     if (!patient_id || !medicine_id) {
         return res.status(400).json({ error: 'patient_id and medicine_id required' });
     }
-    // We need the doctor ID from the logged-in user.
-    // The user ID is in req.user.id. 
-    // But the `doctors` table has its own `id`. We need to map user_id -> doctor_id?
-    // Wait, let's look at `doctors` table in db.ts. `doctors` doesn't have a `user_id`. 
-    // Wait, how do doctors work in the rest of the app?
-    // Let me check if doctors have user_id, or if we just pass doctor_id from frontend.
-    // I bet we just pass doctor_id from frontend in this prototype.
-    const doctor_id = req.body.doctor_id;
-    if (!doctor_id) {
-        return res.status(400).json({ error: 'doctor_id required' });
+    const result = db_1.default.prepare('SELECT id FROM doctors WHERE name = ?').get(req.user?.name);
+    if (!result) {
+        return res.status(403).json({ error: 'Authenticated user is not an active doctor' });
     }
+    const doctor_id = result.id;
     try {
-        const result = db_1.default.prepare(`
+        const insertResult = db_1.default.prepare(`
             INSERT INTO prescriptions (patient_id, doctor_id, medicine_id, status)
             VALUES (?, ?, ?, 'pending')
         `).run(patient_id, doctor_id, medicine_id);
-        res.status(201).json({ id: result.lastInsertRowid, status: 'pending' });
+        res.status(201).json({ id: insertResult.lastInsertRowid, status: 'pending' });
     }
     catch (e) {
         res.status(500).json({ error: e.message });
@@ -89,7 +83,7 @@ router.patch('/:id/dispense', auth_1.authenticate, (0, auth_1.requireRole)('phar
     }
     // Transaction to update prescription and decrement stock
     const dispenseTransaction = db_1.default.transaction(() => {
-        db_1.default.prepare('UPDATE prescriptions SET status = ?, dispensed_at = datetime("now") WHERE id = ?').run('dispensed', id);
+        db_1.default.prepare("UPDATE prescriptions SET status = ?, dispensed_at = datetime('now') WHERE id = ?").run('dispensed', id);
         db_1.default.prepare('UPDATE medicines SET stock_quantity = stock_quantity - 1 WHERE id = ?').run(prescription.medicine_id);
     });
     try {
